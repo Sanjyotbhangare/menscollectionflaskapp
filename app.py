@@ -1,5 +1,8 @@
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, session
 from flask_sqlalchemy import SQLAlchemy
+from flask_session import Session
+from dotenv import load_dotenv
+load_dotenv()
 import os
 from sqlalchemy import or_
 import datetime
@@ -7,20 +10,16 @@ import datetime
 # Creating Flask App
 app = Flask(__name__)
 
-app.config['SQLALCHEMY_DATABASE_URI'] = "postgres://qgeplhiqaiqjkc:5441b15685a420e804ee7f5a8e867256403ff2a9a976400ca4a54466dce7c144@ec2-44-195-100-240.compute-1.amazonaws.com:5432/d28ku781comne6"
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URI')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SQLALCHEMY_POOL_TIMEOUT'] = 300
 app.config['UPLOAD_FOLDER'] = "static/images/"
+app.config['SECRET_KEY'] = "SECRET KEY"
+app.config['SESSION_TYPE'] = "filesystem"
 # Creating SQLAlchemy ORM model
 db = SQLAlchemy(app)
+Session(app)
 # postgresql://postgres:root@127.0.0.1:5432/menscollection
-
-
-db.session.cart_items = {}
-db.session.cart_size = 0
-db.session.search = ''
-db.session.mobile_no = ''
-db.session.admin = ''
 
 
 class customException(Exception):
@@ -72,18 +71,23 @@ class Admin(db.Model):
 
 @app.route("/")
 def index():
+    session['cart_size'] = 0
+    session['mobile_no'] = ''
+    session['search'] = ''
+    session['cart_items'] = {}
+    session['admin'] = ''
     return render_template("index.html")
 
 
 @app.route("/SignIn", methods=['GET', 'POST'])
-def signIn():
+def signin():
     # Check user is already logged in or not
     try:
-        if db.session.mobile_no != '':
+        if session['mobile_no'] != '':
             raise customException("Already Logged In ..!")
     except customException as e:
         allproduct = Product.query.all()
-        return render_template("products.html", products=allproduct, cart=db.session.cart_size, msg=e)
+        return render_template("products.html", products=allproduct, cart=session['cart_size'], msg=e)
 
     if request.method == "POST":
         # validating mobile number and password
@@ -110,9 +114,9 @@ def signIn():
                 if len(find_customer) == 0:
                     raise customException("Invalid Mobile Number or Password .!!!")
                 else:
-                    db.session.mobile_no = mobile
+                    session['mobile_no'] = mobile
                     allproduct = Product.query.all()
-                    return render_template("products.html", products=allproduct, cart=db.session.cart_size)
+                    return render_template("products.html", products=allproduct, cart=session['cart_size'])
 
         except customException as e:
             return render_template("signIn.html", msg=e)
@@ -121,7 +125,7 @@ def signIn():
 
 
 @app.route("/ForgetPassword", methods=['GET', 'POST'])
-def forgetPassword():
+def forget_password():
     if request.method == "POST":
         # validating mobile number and password
         mobile = request.form.get('mobileno')
@@ -159,7 +163,7 @@ def forgetPassword():
 
 
 @app.route("/SignUp", methods=['GET', 'POST'])
-def signUp():
+def signup():
     # validating mobile number and password
     if request.method == "POST":
         mobile = request.form.get('mobileno')
@@ -208,57 +212,55 @@ def signUp():
 @app.route("/Products")
 def products():
     allproduct = Product.query.all()
-    return render_template("products.html", products=allproduct, cart=db.session.cart_size)
+    return render_template("products.html", products=allproduct, cart=session['cart_size'])
 
 
 @app.route("/Search", methods=['GET', 'POST'])
 def search():
     if request.method == "POST":
-        db.session.search = request.form.get('search')
+        session['search'] = request.form.get('search').strip().lower()
         try:
             # searching in database
             allproduct = Product.query.filter(
-                or_(Product.brand.like('%' + db.session.search + '%'),
-                    Product.category.like('%' + db.session.search + '%'),
-                    Product.clothe_type.like('%' + db.session.search + '%'),
-                    Product.pattern.like('%' + db.session.search + '%'),
-                    Product.fitting.like('%' + db.session.search + '%'),
-                    Product.color.like('%' + db.session.search + '%'),
-                    Product.rate.like('%' + db.session.search + '%'))).all()
+                or_(Product.brand.like('%' + session['search'] + '%'),
+                    Product.category.like('%' + session['search'] + '%'),
+                    Product.clothe_type.like('%' + session['search'] + '%'),
+                    Product.pattern.like('%' + session['search'] + '%'),
+                    Product.fitting.like('%' + session['search'] + '%'),
+                    Product.color.like('%' + session['search'] + '%'))).all()
 
             if len(allproduct) == 0:
                 raise customException("No Product Found .!!!")
         except customException as e:
             return render_template("products.html", msg=e)
 
-        return render_template("products.html", products=allproduct, cart=db.session.cart_size)
+        return render_template("products.html", products=allproduct, cart=session['cart_size'])
 
 
 @app.route("/AddToCart", methods=['GET', 'POST'])
-def addToCart():
+def add_to_cart():
     # Check user is already logged in or not
     try:
-        if db.session.mobile_no == '':
+        if session['mobile_no'] == '':
             raise customException("Need to login .!!!")
 
         # Adding product to cart item
         if request.method == "POST":
-            db.session.cart_items.update({request.form.get('pid'): 1})
-            db.session.cart_size = len(db.session.cart_items)
+            session['cart_items'].update({request.form.get('pid'): 1})
+            session['cart_size'] = len(session['cart_items'])
 
-        if db.session.search == '':
+        if session['search'] == '':
             allproduct = Product.query.all()
         else:
             allproduct = Product.query.filter(
-                or_(Product.brand.like('%' + db.session.search + '%'),
-                    Product.category.like('%' + db.session.search + '%'),
-                    Product.clothe_type.like('%' + db.session.search + '%'),
-                    Product.pattern.like('%' + db.session.search + '%'),
-                    Product.fitting.like('%' + db.session.search + '%'),
-                    Product.color.like('%' + db.session.search + '%'),
-                    Product.rate.like('%' + db.session.search + '%'))).all()
+                or_(Product.brand.like('%' + session['search'] + '%'),
+                    Product.category.like('%' + session['search'] + '%'),
+                    Product.clothe_type.like('%' + session['search'] + '%'),
+                    Product.pattern.like('%' + session['search'] + '%'),
+                    Product.fitting.like('%' + session['search'] + '%'),
+                    Product.color.like('%' + session['search'] + '%'))).all()
 
-        return render_template("products.html", products=allproduct, cart=db.session.cart_size)
+        return render_template("products.html", products=allproduct, cart=session['cart_size'])
 
     except customException as e:
         return render_template("signIn.html", msg=e)
@@ -268,16 +270,16 @@ def addToCart():
 def cart():
     # Check user is already logged in or not
     try:
-        if db.session.mobile_no == '':
+        if session['mobile_no'] == '':
             raise customException("Need to login .!!!")
         cart_products = []
         # getting product information from database
-        for prod_id in db.session.cart_items:
+        for prod_id in session['cart_items']:
             product_info = Product.query.filter_by(product_id=int(prod_id)).all()
             for i in product_info:
                 cart_products.append(i)
 
-        return render_template("cart.html", packed=zip(cart_products, db.session.cart_items.values()))
+        return render_template("cart.html", packed=zip(cart_products, session['cart_items'].values()))
 
     except customException as e:
         return render_template("signIn.html", msg=e)
@@ -287,43 +289,43 @@ def cart():
 def remove():
     # Removing product from cart item
     if request.method == "POST":
-        db.session.cart_items.pop(request.form.get('pid'))
+        session['cart_items'].pop(request.form.get('pid'))
 
     return cart()
 
 
 @app.route("/ChangeQuantity", methods=['GET', 'POST'])
-def changeQuantity():
+def change_quantity():
     # Updating quantity by updating
     if request.method == "POST":
         qty = request.form.get('mod_quantity')
-        db.session.cart_items.update({request.form.get('pid'): int(qty)})
+        session['cart_items'].update({request.form.get('pid'): int(qty)})
 
     cart_products = []
     # getting product information from database
-    for prod_id in db.session.cart_items:
+    for prod_id in session['cart_items']:
         product_info = Product.query.filter_by(product_id=int(prod_id)).all()
         for i in product_info:
             cart_products.append(i)
 
-    return render_template("cart.html", packed=zip(cart_products, db.session.cart_items.values()))
+    return render_template("cart.html", packed=zip(cart_products, session['cart_items'].values()))
 
 
 @app.route("/Purchase", methods=['GET', 'POST'])
 def purchase():
     try:
-        if len(db.session.cart_items) == 0:
+        if len(session['cart_items']) == 0:
             raise customException('Add Some Item to the Cart  .!!!')
 
         address = request.form.get('address').strip()
         total_amount = request.form.get('grand_total')
         # Inserting Order in order_product table
-        entry = OrderProduct(order_date=datetime.date.today(), mobile_number=int(db.session.mobile_no), address=address,
+        entry = OrderProduct(order_date=datetime.date.today(), mobile_number=int(session['mobile_no']), address=address,
                              total_amount=int(total_amount))
         db.session.add(entry)
         db.session.commit()
 
-        for item, qty in db.session.cart_items.items():
+        for item, qty in session['cart_items'].items():
             price = 0
             price_info = Product.query.filter_by(product_id=item).all()
             for i in price_info:
@@ -334,30 +336,29 @@ def purchase():
             db.session.add(product_info)
             db.session.commit()
 
-        db.session.cart_items = {}
-        db.session.cart_size = 0
+        session['cart_items'] = {}
+        session['cart_size'] = 0
         allproduct = Product.query.all()
         return render_template("products.html", products=allproduct,
-                               cart=db.session.cart_size, success="Order Placed Successfully")
+                               cart=session['cart_size'], success="Order Placed Successfully")
 
     except customException as e:
         allproduct = Product.query.all()
-        return render_template("products.html", products=allproduct, msg=e)
+        return render_template("products.html", products=allproduct, cart=session['cart_size'], msg=e)
 
 
 @app.route("/PreviousOrder")
-def previousOrder():
+def previous_order():
     # Check user is already logged in or not
     try:
-        if db.session.mobile_no == '':
+        if session['mobile_no'] == '':
             raise customException("Need To Login ..!")
     except customException as e:
         return render_template("signIn.html", msg=e)
 
     # Getting information of previous order of user from database
     query = "select * from order_details join order_product using(order_id) join product using(product_id)" \
-            " where mobile_number = " + db.session.mobile_no + " order by order_date desc"
-    print(query)
+            " where mobile_number = " + session['mobile_no'] + " order by order_date desc"
     result = db.session.execute(query)
     return render_template("previousOrder.html", result=result)
 
@@ -366,14 +367,14 @@ def previousOrder():
 def logout():
     # Check user is already logged in or not
     try:
-        if db.session.mobile_no == '':
+        if session['mobile_no'] == '':
             raise customException("Need to login .!!!")
 
         # Removing values from all session variables
-        db.session.cart_items = {}
-        db.session.cart_size = 0
-        db.session.search = ''
-        db.session.mobile_no = ''
+        session['cart_items'] = {}
+        session['cart_size'] = 0
+        session['search'] = ''
+        session['mobile_no'] = ''
         return render_template("index.html")
 
     except customException as e:
@@ -381,10 +382,10 @@ def logout():
 
 
 @app.route("/AdminLogin", methods=['GET', 'POST'])
-def adminLogin():
+def admin_login():
     # Checking admin already login or not
     try:
-        if db.session.admin != '':
+        if session['admin'] != '':
             raise customException("Already Logged In ..!")
     except customException as e:
         query = "select * from order_product join order_details using(order_id) order by order_date desc"
@@ -392,11 +393,11 @@ def adminLogin():
         return render_template("admin.html", result=result, msg=e)
 
     if request.method == "POST":
-        idNumber = request.form.get('id')
+        idnumber = request.form.get('id')
         password = request.form.get('password')
         # validating inputs
         try:
-            if idNumber == '':
+            if idnumber == '':
                 raise customException("Please Enter Mobile Number")
             elif password == '':
                 raise customException("Please Enter Password")
@@ -406,11 +407,11 @@ def adminLogin():
                 raise customException("Password Should Contain Digits or Alphabets Only")
             else:
                 # Checking id is present or not
-                find_admin = Admin.query.filter_by(admin_id=idNumber, password=password).all()
+                find_admin = Admin.query.filter_by(admin_id=idnumber, password=password).all()
                 if len(find_admin) == 0:
                     raise customException("Invalid Id or Password .!!!")
                 else:
-                    db.session.admin = idNumber
+                    session['admin'] = idnumber
                     query = "select * from order_product join order_details using(order_id) order by order_date desc"
                     result = db.session.execute(query)
                     return render_template("admin.html", result=result)
@@ -425,7 +426,7 @@ def adminLogin():
 def administrator():
     # Checking admin already login or not
     try:
-        if db.session.admin == '':
+        if session['admin'] == '':
             raise customException("Need To Login ..!")
     except customException as e:
         return render_template("adminLogin.html", msg=e)
@@ -437,10 +438,10 @@ def administrator():
 
 
 @app.route("/AdminProducts")
-def adminProducts():
+def admin_products():
     # Checking admin already login or not
     try:
-        if db.session.admin == '':
+        if session['admin'] == '':
             raise customException("Need To Login ..!")
     except customException as e:
         return render_template("adminLogin.html", msg=e)
@@ -451,10 +452,10 @@ def adminProducts():
 
 
 @app.route("/AddProduct", methods=['GET', 'POST'])
-def addProduct():
+def add_product():
     # Checking admin already login or not
     try:
-        if db.session.admin == '':
+        if session['admin'] == '':
             raise customException("Need To Login ..!")
     except customException as e:
         return render_template("adminLogin.html", msg=e)
@@ -508,10 +509,10 @@ def addProduct():
 
 
 @app.route("/DeleteProduct", methods=['GET', 'POST'])
-def deleteProduct():
+def delete_product():
     # Checking admin already login or not
     try:
-        if db.session.admin == '':
+        if session['admin'] == '':
             raise customException("Need To Login ..!")
     except customException as e:
         return render_template("adminLogin.html", msg=e)
@@ -527,14 +528,14 @@ def deleteProduct():
 
 
 @app.route("/AdminLogout")
-def adminLogout():
+def admin_logout():
     # Checking admin already login or not
     try:
-        if db.session.admin == '':
+        if session['admin'] == '':
             raise customException("Need to login .!!!")
 
         # removing allocated session variable
-        db.session.admin = ''
+        session['admin'] = ''
         return render_template("index.html")
 
     except customException as e:
